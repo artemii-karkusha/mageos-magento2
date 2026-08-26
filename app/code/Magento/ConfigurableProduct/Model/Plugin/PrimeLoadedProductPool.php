@@ -13,7 +13,7 @@ use Magento\Catalog\Model\ResourceModel\Product\CollectionFactory;
 use Magento\ConfigurableProduct\Model\Product\LoadedProductPool;
 use Magento\ConfigurableProduct\Model\Product\ParentLinkCache;
 use Magento\Framework\App\ResourceConnection;
-use Magento\Framework\Data\Collection\AbstractDb;
+use Magento\Framework\Data\Collection;
 use Magento\Framework\EntityManager\MetadataPool;
 
 /**
@@ -84,15 +84,23 @@ class PrimeLoadedProductPool
     /**
      * Preload the parents of everything the listing is about to render.
      *
+     * ListProduct::getLoadedProductCollection() declares no return type and a
+     * block may be handed any collection through setCollection() - core's own
+     * ListTest does exactly that with a plain Data\Collection. A plugin must not
+     * narrow that contract, so the parameter stays untyped and anything without
+     * items to inspect is passed straight back.
+     *
      * @param ListProduct $subject
-     * @param AbstractDb $collection
-     * @return AbstractDb
+     * @param mixed $collection
+     * @return mixed
      * @SuppressWarnings(PHPMD.UnusedFormalParameter)
      */
-    public function afterGetLoadedProductCollection(
-        ListProduct $subject,
-        AbstractDb $collection
-    ): AbstractDb {
+    public function afterGetLoadedProductCollection(ListProduct $subject, $collection)
+    {
+        if (!$collection instanceof Collection) {
+            return $collection;
+        }
+
         $childIds = [];
         foreach ($collection->getItems() as $product) {
             $id = (int)$product->getId();
