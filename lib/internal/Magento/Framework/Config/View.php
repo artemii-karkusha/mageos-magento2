@@ -5,6 +5,8 @@
  */
 namespace Magento\Framework\Config;
 
+use Magento\Framework\Serialize\SerializerInterface;
+
 /**
  * View configuration files handler
  *
@@ -13,6 +15,11 @@ namespace Magento\Framework\Config;
  */
 class View extends \Magento\Framework\Config\Reader\Filesystem
 {
+    /**
+     * Prefix for the merged view configuration cache entries.
+     */
+    private const CACHE_ID_PREFIX = 'view_config_';
+
     /**
      * @var array
      */
@@ -26,6 +33,27 @@ class View extends \Magento\Framework\Config\Reader\Filesystem
     protected $data;
 
     /**
+     * @var CacheInterface|null
+     */
+    private $cache;
+
+    /**
+     * @var SerializerInterface|null
+     */
+    private $serializer;
+
+    /**
+     * Identifies which theme and area this instance resolves files for.
+     *
+     * Empty when the caller did not say, in which case the merged result is not
+     * cached: the file set would then depend on whatever design is current, and
+     * a single cache entry could not represent it correctly.
+     *
+     * @var string
+     */
+    private $cacheSuffix;
+
+    /**
      * @param FileResolverInterface $fileResolver
      * @param ConverterInterface $converter
      * @param SchemaLocatorInterface $schemaLocator
@@ -35,6 +63,9 @@ class View extends \Magento\Framework\Config\Reader\Filesystem
      * @param string $domDocumentClass
      * @param string $defaultScope
      * @param array $xpath
+     * @param CacheInterface|null $cache
+     * @param SerializerInterface|null $serializer
+     * @param string $cacheSuffix
      */
     public function __construct(
         FileResolverInterface $fileResolver,
@@ -45,9 +76,15 @@ class View extends \Magento\Framework\Config\Reader\Filesystem
         $idAttributes = [],
         $domDocumentClass = \Magento\Framework\Config\Dom::class,
         $defaultScope = 'global',
-        $xpath = []
+        $xpath = [],
+        ?CacheInterface $cache = null,
+        ?SerializerInterface $serializer = null,
+        string $cacheSuffix = ''
     ) {
         $this->xpath = $xpath;
+        $this->cache = $cache;
+        $this->serializer = $serializer;
+        $this->cacheSuffix = $cacheSuffix;
         $idAttributes = $this->getIdAttributes();
         parent::__construct(
             $fileResolver,
@@ -207,6 +244,39 @@ class View extends \Magento\Framework\Config\Reader\Filesystem
     public function read($scope = null)
     {
         $scope = $scope ?: $this->_defaultScope;
+
+        if ($this->cache === null || $this->serializer === null || $this->cacheSuffix === '') {
+            return $this->readAndMerge($scope);
+        }
+
+        $cacheId = self::CACHE_ID_PREFIX . preg_replace(
+            '/[^a-zA-Z0-9_]/',
+            '_',
+            $this->cacheSuffix . '_' . $scope
+        );
+
+        $cached = $this->cache->load($cacheId);
+        if ($cached !== false) {
+            return $this->serializer->unserialize($cached);
+        }
+
+        $result = $this->readAndMerge($scope);
+        // Saved through the config cache frontend, which applies its own CONFIG
+        // tag, so `bin/magento cache:clean config` clears this with every other
+        // merged XML config.
+        $this->cache->save($this->serializer->serialize($result), $cacheId);
+
+        return $result;
+    }
+
+    /**
+     * Read every view.xml that applies to this scope and merge them, parents first.
+     *
+     * @param string $scope
+     * @return array
+     */
+    private function readAndMerge($scope)
+    {
         $result = [];
 
         $parents = (array)$this->_fileResolver->getParents($this->_fileName, $scope);

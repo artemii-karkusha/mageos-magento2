@@ -1274,6 +1274,8 @@
             <argument name="converter" xsi:type="object">Magento\Framework\Config\Converter</argument>
             <argument name="schemaLocator" xsi:type="object">Magento\Framework\Config\SchemaLocator</argument>
             <argument name="fileResolver" xsi:type="object">Magento\Framework\Config\FileResolver</argument>
+            <argument name="cache" xsi:type="object">Magento\Framework\Config\CacheInterface</argument>
+            <argument name="serializer" xsi:type="object">Magento\Framework\Serialize\SerializerInterface</argument>
         </arguments>
     </type>
     <type name="Magento\Framework\DB\SelectFactory">
