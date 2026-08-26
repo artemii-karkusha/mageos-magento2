@@ -34,4 +34,18 @@
     <type name="Magento\Catalog\Block\Product\ListProduct">
         <plugin name="configurable_product_prime_loaded_product_pool" type="Magento\ConfigurableProduct\Model\Plugin\PrimeLoadedProductPool"/>
     </type>
+    <!--
+        Both collaborators are named explicitly rather than left to the
+        constructor's ObjectManager::getInstance() fallback. That fallback reads
+        the global static instance, which is not guaranteed to be the object
+        manager that built the preloading plugin. When they diverge the extender
+        consults an empty pool and silently reloads every parent — measured
+        happening in integration tests, where the object manager is rebuilt.
+    -->
+    <type name="Magento\ConfigurableProduct\Model\Plugin\ProductIdentitiesExtender">
+        <arguments>
+            <argument name="loadedProductPool" xsi:type="object">Magento\ConfigurableProduct\Model\Product\LoadedProductPool</argument>
+            <argument name="parentLinkCache" xsi:type="object">Magento\ConfigurableProduct\Model\Product\ParentLinkCache</argument>
+        </arguments>
+    </type>
 </config>

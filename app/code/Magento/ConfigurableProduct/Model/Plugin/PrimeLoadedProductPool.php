@@ -116,10 +116,18 @@ class PrimeLoadedProductPool
                 $parentIds[$id] = $id;
             }
         }
-        $parentIds = array_diff(array_keys($parentIds), $childIds);
+        $parentIds = array_keys($parentIds);
         if (!$parentIds) {
             return $collection;
         }
+
+        // Parents that appear in the listing themselves are deliberately NOT
+        // skipped. Reusing the listing's own instance looks free, but a listing
+        // collection selects its own attribute set and does not guarantee the
+        // orig-data state Product::getIdentities() depends on, so a pooled
+        // listing item could yield different cache tags. Loading every parent
+        // through the controlled select below costs one extra query for the
+        // page and keeps the tags provably identical.
 
         // One query for the website assignments the extender checks per parent
         // whenever the store is not the admin store.
