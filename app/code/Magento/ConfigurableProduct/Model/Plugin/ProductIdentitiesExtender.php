@@ -58,6 +58,19 @@ class ProductIdentitiesExtender implements ResetAfterRequestInterface
     /**
      * Add parent identities to product identities
      *
+     * The parent's cache tag is derived from its id rather than by loading the
+     * product. Product::getIdentities() gates every branch that could add more
+     * than [CACHE_TAG . '_' . id, CACHE_TAG] on state that only a save
+     * produces — getOrigData() differing from getData(), getIsChangedCategories(),
+     * isStockStatusChanged(), isObjectNew() — and none of those is ever true for
+     * a product just read from the repository. The bare CACHE_TAG is already in
+     * $identities whenever the parent would have contributed it, because the
+     * subject added it under the same frontend-area condition.
+     *
+     * Loading the parent therefore cost a full model load (10 SELECTs measured)
+     * to produce one predictable string. On a category page of configurables
+     * that ran once per product: ~470 of 948 SELECTs on a 48-product page.
+     *
      * @param Product $subject
      * @param array $identities
      * @return array
@@ -78,8 +91,7 @@ class ProductIdentitiesExtender implements ResetAfterRequestInterface
                 $addParentIdentities = in_array($store->getWebsiteId(), $parentWebsiteIds);
             }
             if ($addParentIdentities) {
-                $parentProduct = $this->productRepository->getById($parentId);
-                $parentProductsIdentities[] = $parentProduct->getIdentities();
+                $parentProductsIdentities[] = [Product::CACHE_TAG . '_' . $parentId];
             }
         }
         $identities = array_merge($identities, ...$parentProductsIdentities);
