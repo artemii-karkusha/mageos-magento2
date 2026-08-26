@@ -12,7 +12,9 @@ use Magento\Catalog\Model\ResourceModel\Product\Website\Link as ProductWebsiteLi
 use Magento\ConfigurableProduct\Model\Product\Type\Configurable as ConfigurableType;
 use Magento\Catalog\Api\ProductRepositoryInterface;
 use Magento\Catalog\Model\Product;
+use Magento\ConfigurableProduct\Model\Product\LoadedProductPool;
 use Magento\Framework\ObjectManager\ResetAfterRequestInterface;
+use Magento\Framework\App\ObjectManager;
 use Magento\Store\Model\Store;
 
 /**
@@ -41,18 +43,29 @@ class ProductIdentitiesExtender implements ResetAfterRequestInterface
     private $cacheParentIdsByChild = [];
 
     /**
+     * @var LoadedProductPool
+     */
+    private $loadedProductPool;
+
+    /**
      * @param ConfigurableType $configurableType
      * @param ProductRepositoryInterface $productRepository
      * @param ProductWebsiteLink $productWebsiteLink
+     * @param LoadedProductPool|null $loadedProductPool
      */
     public function __construct(
         ConfigurableType $configurableType,
         ProductRepositoryInterface $productRepository,
-        ProductWebsiteLink $productWebsiteLink
+        ProductWebsiteLink $productWebsiteLink,
+        ?LoadedProductPool $loadedProductPool = null
     ) {
         $this->configurableType = $configurableType;
         $this->productRepository = $productRepository;
         $this->productWebsiteLink = $productWebsiteLink;
+        // Optional and last so the constructor stays backward compatible for
+        // anything that instantiates this plugin directly.
+        $this->loadedProductPool = $loadedProductPool
+            ?? ObjectManager::getInstance()->get(LoadedProductPool::class);
     }
 
     /**
@@ -78,13 +91,30 @@ class ProductIdentitiesExtender implements ResetAfterRequestInterface
                 $addParentIdentities = in_array($store->getWebsiteId(), $parentWebsiteIds);
             }
             if ($addParentIdentities) {
-                $parentProduct = $this->productRepository->getById($parentId);
-                $parentProductsIdentities[] = $parentProduct->getIdentities();
+                $parentProductsIdentities[] = $this->getParentProduct((int)$parentId)->getIdentities();
             }
         }
         $identities = array_merge($identities, ...$parentProductsIdentities);
 
         return array_unique($identities);
+    }
+
+    /**
+     * Resolve the parent product, preferring one this request already loaded.
+     *
+     * On a category page the parents are the listing's own products, so the
+     * pool answers every lookup and the repository is never touched. Elsewhere
+     * — a product page, a widget, an API call — the pool is empty and this
+     * falls back to the original behaviour.
+     *
+     * @param int $parentId
+     * @return \Magento\Catalog\Api\Data\ProductInterface
+     */
+    private function getParentProduct(int $parentId)
+    {
+        $pooled = $this->loadedProductPool->get($parentId);
+
+        return $pooled ?? $this->productRepository->getById($parentId);
     }
 
     /**

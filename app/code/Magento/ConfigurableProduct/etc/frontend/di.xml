@@ -26,4 +26,12 @@
     <type name="Magento\CatalogWidget\Block\Product\ProductsList">
         <plugin name="configurable_product_widget_product_list" type="Magento\ConfigurableProduct\Plugin\CatalogWidget\Block\Product\ProductsListPlugin" sortOrder="2"/>
     </type>
+    <!--
+        Page-level preload: register the listing's already-loaded products so
+        ProductIdentitiesExtender can resolve a configurable parent from memory
+        instead of loading it again through the repository.
+    -->
+    <type name="Magento\Catalog\Block\Product\ListProduct">
+        <plugin name="configurable_product_prime_loaded_product_pool" type="Magento\ConfigurableProduct\Model\Plugin\PrimeLoadedProductPool"/>
+    </type>
 </config>
