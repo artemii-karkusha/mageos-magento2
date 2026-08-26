@@ -13,6 +13,7 @@ use Magento\ConfigurableProduct\Model\Product\Type\Configurable as ConfigurableT
 use Magento\Catalog\Api\ProductRepositoryInterface;
 use Magento\Catalog\Model\Product;
 use Magento\ConfigurableProduct\Model\Product\LoadedProductPool;
+use Magento\ConfigurableProduct\Model\Product\ParentLinkCache;
 use Magento\Framework\ObjectManager\ResetAfterRequestInterface;
 use Magento\Framework\App\ObjectManager;
 use Magento\Store\Model\Store;
@@ -48,16 +49,23 @@ class ProductIdentitiesExtender implements ResetAfterRequestInterface
     private $loadedProductPool;
 
     /**
+     * @var ParentLinkCache
+     */
+    private $parentLinkCache;
+
+    /**
      * @param ConfigurableType $configurableType
      * @param ProductRepositoryInterface $productRepository
      * @param ProductWebsiteLink $productWebsiteLink
      * @param LoadedProductPool|null $loadedProductPool
+     * @param ParentLinkCache|null $parentLinkCache
      */
     public function __construct(
         ConfigurableType $configurableType,
         ProductRepositoryInterface $productRepository,
         ProductWebsiteLink $productWebsiteLink,
-        ?LoadedProductPool $loadedProductPool = null
+        ?LoadedProductPool $loadedProductPool = null,
+        ?ParentLinkCache $parentLinkCache = null
     ) {
         $this->configurableType = $configurableType;
         $this->productRepository = $productRepository;
@@ -66,6 +74,8 @@ class ProductIdentitiesExtender implements ResetAfterRequestInterface
         // anything that instantiates this plugin directly.
         $this->loadedProductPool = $loadedProductPool
             ?? ObjectManager::getInstance()->get(LoadedProductPool::class);
+        $this->parentLinkCache = $parentLinkCache
+            ?? ObjectManager::getInstance()->get(ParentLinkCache::class);
     }
 
     /**
@@ -87,7 +97,8 @@ class ProductIdentitiesExtender implements ResetAfterRequestInterface
         foreach ($this->getParentIdsByChild($subject->getId()) as $parentId) {
             $addParentIdentities = true;
             if (Store::DEFAULT_STORE_ID !== (int) $store->getId()) {
-                $parentWebsiteIds = $this->productWebsiteLink->getWebsiteIdsByProductId($parentId);
+                $parentWebsiteIds = $this->parentLinkCache->getWebsiteIds((int)$parentId)
+                    ?? $this->productWebsiteLink->getWebsiteIdsByProductId($parentId);
                 $addParentIdentities = in_array($store->getWebsiteId(), $parentWebsiteIds);
             }
             if ($addParentIdentities) {
@@ -126,7 +137,10 @@ class ProductIdentitiesExtender implements ResetAfterRequestInterface
     private function getParentIdsByChild($childId)
     {
         if (!isset($this->cacheParentIdsByChild[$childId])) {
-            $this->cacheParentIdsByChild[$childId] = $this->configurableType->getParentIdsByChild($childId);
+            // A listing preloads the whole page's map in one query; outside a
+            // listing nothing does, and this falls back to the per-child query.
+            $this->cacheParentIdsByChild[$childId] = $this->parentLinkCache->getParentIdsByChild((int)$childId)
+                ?? $this->configurableType->getParentIdsByChild($childId);
         }
 
         return $this->cacheParentIdsByChild[$childId];

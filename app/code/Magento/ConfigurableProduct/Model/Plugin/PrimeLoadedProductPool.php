@@ -7,11 +7,14 @@ declare(strict_types=1);
 
 namespace Magento\ConfigurableProduct\Model\Plugin;
 
+use Magento\Catalog\Api\Data\ProductInterface;
 use Magento\Catalog\Block\Product\ListProduct;
 use Magento\Catalog\Model\ResourceModel\Product\CollectionFactory;
 use Magento\ConfigurableProduct\Model\Product\LoadedProductPool;
-use Magento\ConfigurableProduct\Model\ResourceModel\Product\Type\Configurable as ConfigurableResource;
+use Magento\ConfigurableProduct\Model\Product\ParentLinkCache;
+use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\Data\Collection\AbstractDb;
+use Magento\Framework\EntityManager\MetadataPool;
 
 /**
  * Page-level preload of the configurable parents a listing will need.
@@ -38,28 +41,44 @@ class PrimeLoadedProductPool
     private $pool;
 
     /**
-     * @var ConfigurableResource
-     */
-    private $configurableResource;
-
-    /**
      * @var CollectionFactory
      */
     private $collectionFactory;
 
     /**
+     * @var ParentLinkCache
+     */
+    private $linkCache;
+
+    /**
+     * @var ResourceConnection
+     */
+    private $resource;
+
+    /**
+     * @var MetadataPool
+     */
+    private $metadataPool;
+
+    /**
      * @param LoadedProductPool $pool
-     * @param ConfigurableResource $configurableResource
      * @param CollectionFactory $collectionFactory
+     * @param ParentLinkCache $linkCache
+     * @param ResourceConnection $resource
+     * @param MetadataPool $metadataPool
      */
     public function __construct(
         LoadedProductPool $pool,
-        ConfigurableResource $configurableResource,
-        CollectionFactory $collectionFactory
+        CollectionFactory $collectionFactory,
+        ParentLinkCache $linkCache,
+        ResourceConnection $resource,
+        MetadataPool $metadataPool
     ) {
         $this->pool = $pool;
-        $this->configurableResource = $configurableResource;
         $this->collectionFactory = $collectionFactory;
+        $this->linkCache = $linkCache;
+        $this->resource = $resource;
+        $this->metadataPool = $metadataPool;
     }
 
     /**
@@ -86,13 +105,25 @@ class PrimeLoadedProductPool
             return $collection;
         }
 
-        $parentIds = array_unique(
-            array_map('intval', $this->configurableResource->getParentIdsByChild($childIds))
-        );
-        $parentIds = array_diff($parentIds, $childIds);
+        // One query for the whole page, keyed by child, so the extender does not
+        // repeat getParentIdsByChild() once per product.
+        $parentIdsByChild = $this->loadParentMap($childIds);
+        $this->linkCache->setParentIdsByChild($parentIdsByChild);
+
+        $parentIds = [];
+        foreach ($parentIdsByChild as $ids) {
+            foreach ($ids as $id) {
+                $parentIds[$id] = $id;
+            }
+        }
+        $parentIds = array_diff(array_keys($parentIds), $childIds);
         if (!$parentIds) {
             return $collection;
         }
+
+        // One query for the website assignments the extender checks per parent
+        // whenever the store is not the admin store.
+        $this->linkCache->setWebsiteIds($this->loadWebsiteMap($parentIds));
 
         $parents = $this->collectionFactory->create();
         $parents->addIdFilter($parentIds);
@@ -112,5 +143,62 @@ class PrimeLoadedProductPool
         }
 
         return $collection;
+    }
+
+    /**
+     * Map each child on the page to its parent ids, in one query.
+     *
+     * ConfigurableResource::getParentIdsByChild() accepts an array but returns a
+     * flat list, losing which parent belongs to which child. The mapping is what
+     * lets the extender answer per child without querying again.
+     *
+     * @param int[] $childIds
+     * @return array<int, int[]>
+     */
+    private function loadParentMap(array $childIds): array
+    {
+        $connection = $this->resource->getConnection();
+        $linkField = $this->metadataPool
+            ->getMetadata(ProductInterface::class)
+            ->getLinkField();
+
+        $select = $connection->select()
+            ->from(['l' => $this->resource->getTableName('catalog_product_super_link')], ['product_id'])
+            ->join(
+                ['e' => $this->resource->getTableName('catalog_product_entity')],
+                'e.' . $linkField . ' = l.parent_id',
+                ['entity_id']
+            )
+            ->where('l.product_id IN (?)', $childIds, \Zend_Db::INT_TYPE);
+
+        // Seed with empty arrays so a child with no parents is a cache HIT
+        // rather than a miss that falls back to a per-child query.
+        $map = array_fill_keys($childIds, []);
+        foreach ($connection->fetchAll($select) as $row) {
+            $map[(int)$row['product_id']][] = (int)$row['entity_id'];
+        }
+
+        return $map;
+    }
+
+    /**
+     * Map each product to its website ids, in one query.
+     *
+     * @param int[] $productIds
+     * @return array<int, int[]>
+     */
+    private function loadWebsiteMap(array $productIds): array
+    {
+        $connection = $this->resource->getConnection();
+        $select = $connection->select()
+            ->from($this->resource->getTableName('catalog_product_website'), ['product_id', 'website_id'])
+            ->where('product_id IN (?)', $productIds, \Zend_Db::INT_TYPE);
+
+        $map = array_fill_keys($productIds, []);
+        foreach ($connection->fetchAll($select) as $row) {
+            $map[(int)$row['product_id']][] = (int)$row['website_id'];
+        }
+
+        return $map;
     }
 }
