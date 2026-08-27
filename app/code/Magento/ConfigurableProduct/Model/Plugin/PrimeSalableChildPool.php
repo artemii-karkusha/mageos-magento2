@@ -131,6 +131,12 @@ class PrimeSalableChildPool
         $select = clone $childCollection->getSelect();
         $select->reset(\Magento\Framework\DB\Select::COLUMNS)
             ->columns(['parent_id' => 'link_table.parent_id'])
+            // The collection only renders setProductFilter() into a
+            // "parent_id IN (...)" during load(), and this never loads it, so the
+            // restriction has to be applied here. Without it the query groups over
+            // every configurable in the catalogue and merely happens to return a
+            // superset of the right answer.
+            ->where('link_table.parent_id IN (?)', array_keys($parents), \Zend_Db::INT_TYPE)
             ->group('link_table.parent_id');
 
         foreach ($childCollection->getConnection()->fetchCol($select) as $parentId) {
