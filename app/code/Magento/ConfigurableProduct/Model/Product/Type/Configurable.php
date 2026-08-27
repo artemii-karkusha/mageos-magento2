@@ -13,6 +13,7 @@ use Magento\Catalog\Api\ProductRepositoryInterface;
 use Magento\Catalog\Model\Config;
 use Magento\Catalog\Model\Product\Gallery\ReadHandler as GalleryReadHandler;
 use Magento\ConfigurableProduct\Model\Product\Type\Collection\SalableProcessor;
+use Magento\ConfigurableProduct\Model\Product\SalableChildPool;
 use Magento\ConfigurableProduct\Model\ResourceModel\Product\Type\Configurable\Product\Collection;
 use Magento\Framework\Api\SearchCriteriaBuilder;
 use Magento\Framework\App\ObjectManager;
@@ -185,6 +186,11 @@ class Configurable extends \Magento\Catalog\Model\Product\Type\AbstractType impl
     private $metadataPool;
 
     /**
+     * @var SalableChildPool|null
+     */
+    private $salableChildPool;
+
+    /**
      * @var GalleryReadHandler
      */
     private $productGalleryReadHandler;
@@ -248,6 +254,7 @@ class Configurable extends \Magento\Catalog\Model\Product\Type\AbstractType impl
      * @param ProductAttributeRepositoryInterface|null $productAttributeRepository
      * @param SearchCriteriaBuilder|null $searchCriteriaBuilder
      * @param UploaderFactory|null $uploaderFactory
+     * @param SalableChildPool|null $salableChildPool
      * @SuppressWarnings(PHPMD.ExcessiveParameterList)
      */
     public function __construct(
@@ -275,8 +282,10 @@ class Configurable extends \Magento\Catalog\Model\Product\Type\AbstractType impl
         ?SalableProcessor $salableProcessor = null,
         ?ProductAttributeRepositoryInterface $productAttributeRepository = null,
         ?SearchCriteriaBuilder $searchCriteriaBuilder = null,
-        ?UploaderFactory $uploaderFactory = null
+        ?UploaderFactory $uploaderFactory = null,
+        ?SalableChildPool $salableChildPool = null
     ) {
+        $this->salableChildPool = $salableChildPool;
         $this->typeConfigurableFactory = $typeConfigurableFactory;
         $this->_eavAttributeFactory = $eavAttributeFactory;
         $this->configurableAttributeFactory = $configurableAttributeFactory;
@@ -889,10 +898,24 @@ class Configurable extends \Magento\Catalog\Model\Product\Type\AbstractType impl
         $salable = parent::isSalable($product);
 
         if ($salable !== false) {
-            $collection = $this->getLinkedProductCollection($product);
-            $collection->addStoreFilter($storeId);
-            $collection = $this->salableProcessor->process($collection);
-            $salable = 0 !== $collection->getSize();
+            // A listing asks this of every product it renders, and answering it
+            // costs a COUNT over the parent's linked products each time. When a
+            // page-level batch has already worked the answer out for this parent,
+            // use it; otherwise fall back to counting, unchanged.
+            $metadata = $this->getMetadataPool()->getMetadata(ProductInterface::class);
+            $pooled = $this->salableChildPool === null ? null : $this->salableChildPool->get(
+                $storeId === null ? 0 : $storeId,
+                (int)$product->getData($metadata->getLinkField())
+            );
+
+            if ($pooled !== null) {
+                $salable = $pooled;
+            } else {
+                $collection = $this->getLinkedProductCollection($product);
+                $collection->addStoreFilter($storeId);
+                $collection = $this->salableProcessor->process($collection);
+                $salable = 0 !== $collection->getSize();
+            }
         }
 
         $this->isSaleableBySku[$cacheKey][$sku] = $salable;

@@ -33,6 +33,7 @@
     -->
     <type name="Magento\Catalog\Block\Product\ListProduct">
         <plugin name="configurable_product_prime_loaded_product_pool" type="Magento\ConfigurableProduct\Model\Plugin\PrimeLoadedProductPool"/>
+        <plugin name="configurable_product_prime_salable_child_pool" type="Magento\ConfigurableProduct\Model\Plugin\PrimeSalableChildPool"/>
     </type>
     <!--
         Both collaborators are named explicitly rather than left to the
@@ -46,6 +47,17 @@
         <arguments>
             <argument name="loadedProductPool" xsi:type="object">Magento\ConfigurableProduct\Model\Product\LoadedProductPool</argument>
             <argument name="parentLinkCache" xsi:type="object">Magento\ConfigurableProduct\Model\Product\ParentLinkCache</argument>
+        </arguments>
+    </type>
+    <!--
+        Named explicitly rather than left to constructor defaulting, so the type
+        instance and the priming plugin share one pool. This is the same trap the
+        preload work hit: a nullable constructor argument left unnamed is not
+        guaranteed to be the instance another collaborator was given.
+    -->
+    <type name="Magento\ConfigurableProduct\Model\Product\Type\Configurable">
+        <arguments>
+            <argument name="salableChildPool" xsi:type="object">Magento\ConfigurableProduct\Model\Product\SalableChildPool</argument>
         </arguments>
     </type>
 </config>
