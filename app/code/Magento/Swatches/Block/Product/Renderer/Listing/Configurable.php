@@ -256,6 +256,10 @@ class Configurable extends \Magento\Swatches\Block\Product\Renderer\Configurable
      */
     private function getLayeredAttributesIfExists(Product $configurableProduct, array $additionalAttributes)
     {
+        if (empty($additionalAttributes)) {
+            return [];
+        }
+
         $configurableAttributes = $this->swatchHelper->getAttributesFromConfigurable($configurableProduct);
 
         $layeredAttributes = [];
